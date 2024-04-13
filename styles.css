@@ -1,0 +1,14 @@
+#main_window {
+    background-color: #f0f0f0;
+}
+
+button {
+    color: black;
+    background-color: #4a86e8;
+    border-radius: 8px;
+    padding: 12px 24px;
+}
+
+button:hover {
+    background-color: #357ab8;
+}

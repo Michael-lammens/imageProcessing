@@ -2,15 +2,16 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
+#include "video.h"
 
-// Global variable to store the selected image filename
+// Use a struct instead so we track previous processes. Make local to main
 char *selected_image_filename = NULL;
 
-// Function to handle "Process" button click event
+// User clicks "Process". Open file and parse data. We need a goal for what we want to achieve here
 void process_image(GtkWidget *widget, gpointer data) {
     // Check if an image has been selected
     if (selected_image_filename == NULL) {
-        // No image selected, show an error message
+        // No upload -> show error
         GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(data),
                                                    GTK_DIALOG_DESTROY_WITH_PARENT,
                                                    GTK_MESSAGE_ERROR,
@@ -19,30 +20,16 @@ void process_image(GtkWidget *widget, gpointer data) {
         gtk_dialog_run(GTK_DIALOG(dialog));
         gtk_widget_destroy(dialog);
     } else {
-        // Print the selected image filename for debugging
         printf("Selected image filename: %s\n", selected_image_filename);
-        
-        // Construct the full path to the image file
-        char full_path[512]; 
-        snprintf(full_path, sizeof(full_path), "./output_images_raw/%s", selected_image_filename);
 
-        // Check if the file exists
-        if (access(selected_image_filename, F_OK) == 0) {
-            // File exists, call the video processing function with the selected image filename
-            char command[256];
-            snprintf(command, sizeof(command), "./video %s", full_path);
-            system(command);
+        unsigned char* image_data = readRawImage(selected_image_filename);
+        if (image_data != NULL) {
+            double average_intensity = calculateAverageIntensity(image_data);
+            printf("Average pixel intensity: %f\n", average_intensity);
+            // Do extra stuff here
+            freeImageData(image_data);
         } else {
-            // File does not exist, show an error message
-             // File does not exist or there was an error accessing it
-            if (errno == ENOENT) {
-                fprintf(stderr, "File %s does not exist.\n", full_path);
-            } else {
-                perror("Error accessing file");
-            }
-
-
-
+            perror("Error opening file");
             GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(data),
                                                        GTK_DIALOG_DESTROY_WITH_PARENT,
                                                        GTK_MESSAGE_ERROR,
@@ -55,49 +42,89 @@ void process_image(GtkWidget *widget, gpointer data) {
     }
 }
 
-// Function to handle file selection
+// Use this to init new struct for the new processing instance
+/*
+Struct process_data{
+    file
+    size
+    dims
+    // Get specific run data
+    colored
+    classification
+    segmentation
+    etc
+}
+*/
 void file_selected(GtkFileChooserButton *chooser_button, gpointer data) {
     selected_image_filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(chooser_button));
 }
 
-int main(int argc, char *argv[]) {
-    // Initialize GTK
-    gtk_init(&argc, &argv);
+static void on_button_clicked(GtkWidget *widget, gpointer data) {
+    g_print("Button %s clicked!\n", (char *)data);
+}
 
-    // Create the main window
-    GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+
+
+static void activate(GtkApplication* app, gpointer user_data) {
+    GtkWidget *window;
+    GtkWidget *header_bar;
+    GtkWidget *upload_image_button;
+    GtkWidget *process_image_button;
+    GtkWidget *box;
+    GtkWidget *grid;
+
+    window = gtk_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Image Processor");
-    gtk_container_set_border_width(GTK_CONTAINER(window), 10);
-    gtk_window_set_default_size(GTK_WINDOW(window), 200, 100);
+    gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
 
-    // Create the "Select Image" button
-    GtkWidget *select_button = gtk_file_chooser_button_new("Select Image", GTK_FILE_CHOOSER_ACTION_OPEN);
+    // Create Header w/ Buttons + Title
+    header_bar = gtk_header_bar_new();
+    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header_bar), TRUE);
+    gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), "Image Processor");
+    gtk_window_set_titlebar(GTK_WINDOW(window), header_bar);
+    // BODY content grid:
+    grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10); 
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(window), grid);
+    // Upload Image Button
+    upload_image_button = gtk_file_chooser_button_new("Select Image", GTK_FILE_CHOOSER_ACTION_OPEN);
+    g_signal_connect(upload_image_button, "file-set", G_CALLBACK(file_selected), NULL);
+    gtk_grid_attach(GTK_GRID(grid), upload_image_button, 0, 0, 1, 1); 
+    // Process Image Button
+    process_image_button = gtk_button_new_with_label("Process");
+    g_signal_connect(process_image_button, "clicked", G_CALLBACK(process_image), window);
+    gtk_grid_attach(GTK_GRID(grid), process_image_button, 1, 0, 1, 1); 
+    // Align grid to the top
+    gtk_widget_set_halign(grid, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(grid, GTK_ALIGN_START);
+
+    gtk_widget_set_name(window, "main_window");
     
-    // Connect the "Select Image" button file selection event to a callback function
-    g_signal_connect(select_button, "file-set", G_CALLBACK(file_selected), NULL);
-
-    // Create the "Process" button
-    GtkWidget *process_button = gtk_button_new_with_label("Process");
-
-    // Connect the "Process" button click event to a callback function
-    g_signal_connect(process_button, "clicked", G_CALLBACK(process_image), window);
-
-    // Create a vertical box container
-    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_container_add(GTK_CONTAINER(window), vbox);
-
-    // Add the "Select Image" button and "Process" button to the vertical box
-    gtk_box_pack_start(GTK_BOX(vbox), select_button, TRUE, TRUE, 0);
-    gtk_box_pack_start(GTK_BOX(vbox), process_button, TRUE, TRUE, 0);
-
-    // Show all widgets
+    GtkCssProvider *provider = gtk_css_provider_new();
+    GdkDisplay *display = gdk_display_get_default();
+    GdkScreen *screen = gdk_display_get_default_screen(display);
+    gtk_style_context_add_provider_for_screen(screen,
+                                              GTK_STYLE_PROVIDER(provider),
+                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    GError *error = NULL;
+    gtk_css_provider_load_from_path(GTK_CSS_PROVIDER(provider), "styles.css", &error);
+    if (error) {
+        g_warning("Error loading CSS: %s\n", error->message);
+        g_clear_error(&error);
+    }
+    g_object_unref(provider);
     gtk_widget_show_all(window);
+}
 
-    // Start the GTK main loop
-    gtk_main();
+int main(int argc, char **argv) {
+    GtkApplication *app;
+    int status;
 
-    // Free selected_image_filename
-    g_free(selected_image_filename);
+    app = gtk_application_new("tester", G_APPLICATION_DEFAULT_FLAGS);
+    g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
+    status = g_application_run(G_APPLICATION(app), argc, argv);
+    g_object_unref(app);
 
-    return 0;
+    return status;
 }
